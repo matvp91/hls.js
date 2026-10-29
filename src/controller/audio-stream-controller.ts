@@ -416,7 +416,12 @@ class AudioStreamController
       return;
     }
 
-    if (this.exceedsMaxBuffer(bufferInfo, maxBufLen, frag)) {
+    // Wait for main to enter a new discontinuity first, as stream-controller may hold before it (to reset the MediaSource)
+    const mainFrag = this.mainFragLoading?.frag || this.mainAnchor;
+    if (
+      this.exceedsMaxBuffer(bufferInfo, maxBufLen, frag) ||
+      (mainFrag && frag.cc > mainFrag.cc)
+    ) {
       return;
     }
 

@@ -379,11 +379,55 @@ export default class StreamController
       return;
     }
 
-    if (this.exceedsMaxBuffer(bufferInfo, maxBufLen, frag)) {
+    if (
+      this.exceedsMaxBuffer(bufferInfo, maxBufLen, frag) ||
+      this.holdAtInitRegion(frag, bufferInfo)
+    ) {
       return;
     }
 
     this.loadFragment(frag, levelInfo, targetBufferTime);
+  }
+
+  private holdAtInitRegion(
+    frag: MediaFragment,
+    bufferInfo: BufferInfo,
+  ): boolean {
+    const { config, hls, media } = this;
+    const buffered = this.fragPrevious ?? this.fragPlaying;
+    if (
+      !config.resetMediaSourcePerInitRegion ||
+      !buffered ||
+      buffered.cc === frag.cc
+    ) {
+      return false;
+    }
+    if (!media || media.paused || bufferInfo.len >= config.maxBufferHole) {
+      return true;
+    }
+    const position = Math.max(
+      media.currentTime,
+      frag.start + config.maxBufferHole,
+    );
+    if (!media.seeking) {
+      if (frag.start >= buffered.start) {
+        media.currentTime = position;
+      }
+      return true;
+    }
+    const cc = frag.cc;
+    this.log(
+      `Init region change (cc: ${buffered.cc} -> ${cc}), resetting MediaSource at ${position}`,
+    );
+    const levelDetails = this.getLevelDetails();
+    const encrypted = !!levelDetails?.encryptedFragments.some(
+      (fragment) => fragment.cc === cc,
+    );
+    hls.trigger(Events.INIT_REGION_CHANGING, { frag, position, encrypted });
+    hls.detachMedia();
+    hls.attachMedia(media);
+    hls.startLoad(position);
+    return true;
   }
 
   protected loadFragment(
